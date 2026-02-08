@@ -54,8 +54,9 @@ export default function BubblePage() {
   const [score, setScore] = useState(0);
   const [calmMode, setCalmMode] = useState(false);
   const calmModeRef = useRef(false);
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<string | null>('/angel.jpg');
   const photoRef = useRef<HTMLImageElement | null>(null);
+  const defaultPhotoLoaded = useRef(false);
   const nextIdRef = useRef(0);
   const animFrameRef = useRef<number>(0);
   const lastSpawnRef = useRef(0);
@@ -403,6 +404,16 @@ export default function BubblePage() {
 
   // Sync calm mode ref
   useEffect(() => { calmModeRef.current = calmMode; }, [calmMode]);
+
+  // Load default Angel photo
+  useEffect(() => {
+    if (!defaultPhotoLoaded.current) {
+      defaultPhotoLoaded.current = true;
+      const img = new Image();
+      img.onload = () => { photoRef.current = img; };
+      img.src = '/angel.jpg';
+    }
+  }, []);
 
   const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
