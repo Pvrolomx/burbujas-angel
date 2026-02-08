@@ -73,8 +73,17 @@ const STAR_COLORS = [
   'rgba(255, 200, 255, 1)',
 ];
 
-const FAMILY_NAMES = ['Angel', 'Tia Chely', 'Tia Jessy', 'Diana', 'Hector', 'Israel'];
-const NAME_THRESHOLDS = [10, 20, 35, 50, 70, 90];
+const ALL_FAMILY_NAMES = ['Angel', 'Tia Chely', 'Tia Jessy', 'Diana', 'Hector', 'Israel', 'Santiago'];
+const BASE_THRESHOLDS = [10, 20, 35, 50, 70, 90, 110];
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 export default function BubblePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -102,6 +111,8 @@ export default function BubblePage() {
   const starClickCountRef = useRef(0);
   const nameRevealsRef = useRef<NameReveal[]>([]);
   const revealedNamesRef = useRef<Set<number>>(new Set());
+  const shuffledNamesRef = useRef<string[]>(shuffleArray(ALL_FAMILY_NAMES));
+  const familyCompleteRef = useRef(false);
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -244,15 +255,22 @@ export default function BubblePage() {
     const y = (clientY - rect.top) * (canvas.height / rect.height);
 
     if (starModeRef.current) {
+      // If family was complete, reset on next click
+      if (familyCompleteRef.current) {
+        familyCompleteRef.current = false;
+        starClickCountRef.current = 0;
+        revealedNamesRef.current = new Set();
+        shuffledNamesRef.current = shuffleArray(ALL_FAMILY_NAMES);
+      }
       spawnUserStars(x, y);
       playStarSound();
       starClickCountRef.current++;
       const clickCount = starClickCountRef.current;
-      for (let i = 0; i < NAME_THRESHOLDS.length; i++) {
-        if (clickCount === NAME_THRESHOLDS[i] && !revealedNamesRef.current.has(i)) {
+      for (let i = 0; i < BASE_THRESHOLDS.length; i++) {
+        if (clickCount === BASE_THRESHOLDS[i] && !revealedNamesRef.current.has(i)) {
           revealedNamesRef.current.add(i);
           nameRevealsRef.current.push({
-            name: FAMILY_NAMES[i],
+            name: shuffledNamesRef.current[i],
             x: canvas.width / 2,
             y: canvas.height / 2,
             opacity: 0,
@@ -260,6 +278,9 @@ export default function BubblePage() {
             life: 1,
           });
           playNameRevealSound();
+          if (revealedNamesRef.current.size === ALL_FAMILY_NAMES.length) {
+            familyCompleteRef.current = true;
+          }
         }
       }
       return;
@@ -404,13 +425,13 @@ export default function BubblePage() {
         // Star counter badge
         const starCount = userStarsRef.current.length;
         const clickCount = starClickCountRef.current;
-        const nextIdx = NAME_THRESHOLDS.findIndex((t, i) => !revealedNamesRef.current.has(i));
-        const nextThreshold = nextIdx >= 0 ? NAME_THRESHOLDS[nextIdx] : null;
+        const nextIdx = BASE_THRESHOLDS.findIndex((t, i) => !revealedNamesRef.current.has(i));
+        const nextThreshold = nextIdx >= 0 ? BASE_THRESHOLDS[nextIdx] : null;
         let badgeText = `⭐ ${starCount} estrellas`;
-        if (nextThreshold) {
+        if (familyCompleteRef.current) {
+          badgeText += `  ·  ¡Familia completa! 💫 Toca para reiniciar`;
+        } else if (nextThreshold) {
           badgeText += `  ·  ${clickCount}/${nextThreshold} ✨`;
-        } else if (revealedNamesRef.current.size === FAMILY_NAMES.length) {
-          badgeText += `  ·  ¡Familia completa! 💫`;
         }
         ctx.save();
         ctx.font = '600 20px Fredoka, sans-serif';
