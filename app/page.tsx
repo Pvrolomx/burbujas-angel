@@ -28,13 +28,32 @@ interface Sparkle {
   size: number;
 }
 
+interface Star {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  twinkleSpeed: number;
+  phase: number;
+  color: string;
+}
+
+interface NameReveal {
+  name: string;
+  x: number;
+  y: number;
+  opacity: number;
+  scale: number;
+  life: number;
+}
+
 const COLORS = [
-  'rgba(255, 182, 193, 0.45)', // rosa
-  'rgba(173, 216, 230, 0.45)', // azul
-  'rgba(144, 238, 144, 0.45)', // verde
-  'rgba(255, 255, 150, 0.45)', // amarillo
-  'rgba(200, 162, 255, 0.45)', // morado
-  'rgba(255, 200, 150, 0.45)', // naranja
+  'rgba(255, 182, 193, 0.45)',
+  'rgba(173, 216, 230, 0.45)',
+  'rgba(144, 238, 144, 0.45)',
+  'rgba(255, 255, 150, 0.45)',
+  'rgba(200, 162, 255, 0.45)',
+  'rgba(255, 200, 150, 0.45)',
 ];
 
 const HIGHLIGHT_COLORS = [
@@ -45,6 +64,17 @@ const HIGHLIGHT_COLORS = [
   'rgba(230, 210, 255, 0.7)',
   'rgba(255, 230, 210, 0.7)',
 ];
+
+const STAR_COLORS = [
+  'rgba(255, 255, 255, 1)',
+  'rgba(200, 220, 255, 1)',
+  'rgba(255, 240, 200, 1)',
+  'rgba(200, 255, 255, 1)',
+  'rgba(255, 200, 255, 1)',
+];
+
+const FAMILY_NAMES = ['Angel', 'Tia Chely', 'Tia Jessy', 'Diana', 'Hector', 'Israel'];
+const NAME_THRESHOLDS = [10, 20, 35, 50, 70, 90];
 
 export default function BubblePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -60,10 +90,18 @@ export default function BubblePage() {
   const nextIdRef = useRef(0);
   const animFrameRef = useRef<number>(0);
   const lastSpawnRef = useRef(0);
-  const starsRef = useRef<{ x: number; y: number; size: number; twinkleSpeed: number; phase: number }[]>([]);
+  const bgStarsRef = useRef<{ x: number; y: number; size: number; twinkleSpeed: number; phase: number }[]>([]);
   const [showInstall, setShowInstall] = useState(false);
   const deferredPromptRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Star mode
+  const [starMode, setStarMode] = useState(false);
+  const starModeRef = useRef(false);
+  const userStarsRef = useRef<Star[]>([]);
+  const starClickCountRef = useRef(0);
+  const nameRevealsRef = useRef<NameReveal[]>([]);
+  const revealedNamesRef = useRef<Set<number>>(new Set());
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -89,6 +127,42 @@ export default function BubblePage() {
     } catch (e) {}
   }, [getAudioCtx]);
 
+  const playStarSound = useCallback(() => {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const freq = 800 + Math.random() * 600;
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.5, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {}
+  }, [getAudioCtx]);
+
+  const playNameRevealSound = useCallback(() => {
+    try {
+      const ctx = getAudioCtx();
+      [523, 659, 784].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.08);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime + i * 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+        osc.start(ctx.currentTime + i * 0.08);
+        osc.stop(ctx.currentTime + 0.8);
+      });
+    } catch (e) {}
+  }, [getAudioCtx]);
+
   const spawnBubble = useCallback((x?: number, y?: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -111,6 +185,26 @@ export default function BubblePage() {
       createdAt: Date.now(),
     };
     bubblesRef.current.push(bubble);
+  }, []);
+
+  const spawnUserStars = useCallback((x: number, y: number) => {
+    const count = 3 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 20 + Math.random() * 60;
+      userStarsRef.current.push({
+        id: nextIdRef.current++,
+        x: x + Math.cos(angle) * dist,
+        y: y + Math.sin(angle) * dist,
+        size: 1.5 + Math.random() * 3,
+        twinkleSpeed: 0.01 + Math.random() * 0.02,
+        phase: Math.random() * Math.PI * 2,
+        color: STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)],
+      });
+    }
+    if (userStarsRef.current.length > 500) {
+      userStarsRef.current = userStarsRef.current.slice(-500);
+    }
   }, []);
 
   const spawnSparkles = useCallback((x: number, y: number, isSpecial: boolean) => {
@@ -142,7 +236,6 @@ export default function BubblePage() {
     }
   }, [playPop, spawnSparkles]);
 
-  // Handle touch/click
   const handleInteraction = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -150,7 +243,28 @@ export default function BubblePage() {
     const x = (clientX - rect.left) * (canvas.width / rect.width);
     const y = (clientY - rect.top) * (canvas.height / rect.height);
 
-    // Check if we hit a bubble (check from top/newest first)
+    if (starModeRef.current) {
+      spawnUserStars(x, y);
+      playStarSound();
+      starClickCountRef.current++;
+      const clickCount = starClickCountRef.current;
+      for (let i = 0; i < NAME_THRESHOLDS.length; i++) {
+        if (clickCount === NAME_THRESHOLDS[i] && !revealedNamesRef.current.has(i)) {
+          revealedNamesRef.current.add(i);
+          nameRevealsRef.current.push({
+            name: FAMILY_NAMES[i],
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            opacity: 0,
+            scale: 0.5,
+            life: 1,
+          });
+          playNameRevealSound();
+        }
+      }
+      return;
+    }
+
     const bubbles = bubblesRef.current;
     for (let i = bubbles.length - 1; i >= 0; i--) {
       const b = bubbles[i];
@@ -163,9 +277,8 @@ export default function BubblePage() {
         return;
       }
     }
-    // Touched empty space — create bubble
     spawnBubble(x, y);
-  }, [popBubble, spawnBubble]);
+  }, [popBubble, spawnBubble, spawnUserStars, playStarSound, playNameRevealSound]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -174,8 +287,7 @@ export default function BubblePage() {
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      // Generate stars
-      starsRef.current = Array.from({ length: 30 }, () => ({
+      bgStarsRef.current = Array.from({ length: 50 }, () => ({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
         size: 1 + Math.random() * 2,
@@ -199,7 +311,6 @@ export default function BubblePage() {
     canvas.addEventListener('touchstart', onTouch, { passive: false });
     canvas.addEventListener('mousedown', onClick);
 
-    // Animation loop
     let time = 0;
     const loop = () => {
       time++;
@@ -208,17 +319,24 @@ export default function BubblePage() {
       const w = canvas.width;
       const h = canvas.height;
       const calm = calmModeRef.current;
+      const inStarMode = starModeRef.current;
 
-      // Background gradient
+      // Background
       const grad = ctx.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, '#0a0a2e');
-      grad.addColorStop(0.5, '#1a1a4e');
-      grad.addColorStop(1, '#2d1b69');
+      if (inStarMode) {
+        grad.addColorStop(0, '#050520');
+        grad.addColorStop(0.5, '#0a0a30');
+        grad.addColorStop(1, '#15103a');
+      } else {
+        grad.addColorStop(0, '#0a0a2e');
+        grad.addColorStop(0.5, '#1a1a4e');
+        grad.addColorStop(1, '#2d1b69');
+      }
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
 
-      // Stars
-      starsRef.current.forEach(star => {
+      // Background stars
+      bgStarsRef.current.forEach(star => {
         const alpha = 0.3 + 0.7 * Math.abs(Math.sin(time * star.twinkleSpeed + star.phase));
         ctx.beginPath();
         ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
@@ -226,158 +344,216 @@ export default function BubblePage() {
         ctx.fill();
       });
 
-      // Spawn bubbles
-      const spawnInterval = calm ? 1200 : 600;
-      if (time - lastSpawnRef.current > spawnInterval / 16.67 && bubblesRef.current.filter(b => !b.popping).length < 35) {
-        spawnBubble();
-        lastSpawnRef.current = time;
-      }
-
-      // Update and draw bubbles
-      const bubbles = bubblesRef.current;
-      for (let i = bubbles.length - 1; i >= 0; i--) {
-        const b = bubbles[i];
-        if (b.popping) {
-          b.opacity -= 0.08;
-          b.size += 3;
-          if (b.opacity <= 0) {
-            bubbles.splice(i, 1);
-            continue;
-          }
-        } else {
-          b.y -= b.speedY;
-          b.x += Math.sin(time * b.wobbleSpeed + b.wobbleOffset) * 0.5;
-          if (b.y < -b.size) {
-            bubbles.splice(i, 1);
-            continue;
-          }
-        }
-
-        // Draw bubble
-        ctx.save();
-        ctx.globalAlpha = b.opacity;
-
-        if (b.isSpecial && photoRef.current) {
-          // Photo bubble
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
-          ctx.closePath();
-          ctx.clip();
-          ctx.drawImage(photoRef.current, b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
-          ctx.restore();
+      if (inStarMode) {
+        // User stars
+        userStarsRef.current.forEach(star => {
+          const alpha = 0.4 + 0.6 * Math.abs(Math.sin(time * star.twinkleSpeed + star.phase));
           ctx.save();
-          ctx.globalAlpha = b.opacity;
-          // Gold glow
+          ctx.globalAlpha = alpha;
+          const spikes = 4;
+          const outerR = star.size;
+          const innerR = star.size * 0.4;
           ctx.beginPath();
-          ctx.arc(b.x, b.y, b.size / 2 + 3, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + 0.3 * Math.sin(time * 0.05)})`;
-          ctx.lineWidth = 3;
-          ctx.stroke();
-          // Gold shadow glow
-          ctx.shadowColor = 'rgba(255, 215, 0, 0.4)';
-          ctx.shadowBlur = 15;
-          ctx.stroke();
-        } else if (b.isSpecial) {
-          // Emoji special bubble
-          const radGrad = ctx.createRadialGradient(
-            b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05,
-            b.x, b.y, b.size / 2
-          );
-          radGrad.addColorStop(0, 'rgba(255, 240, 200, 0.6)');
-          radGrad.addColorStop(1, 'rgba(255, 215, 0, 0.3)');
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
-          ctx.fillStyle = radGrad;
+          for (let j = 0; j < spikes * 2; j++) {
+            const r = j % 2 === 0 ? outerR : innerR;
+            const angle = (j * Math.PI) / spikes - Math.PI / 2 + time * 0.005;
+            const sx = star.x + Math.cos(angle) * r;
+            const sy = star.y + Math.sin(angle) * r;
+            if (j === 0) ctx.moveTo(sx, sy);
+            else ctx.lineTo(sx, sy);
+          }
+          ctx.closePath();
+          ctx.fillStyle = star.color;
+          ctx.shadowColor = star.color;
+          ctx.shadowBlur = 6;
           ctx.fill();
-          // Gold border
-          ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + 0.3 * Math.sin(time * 0.05)})`;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          // Emoji
-          ctx.font = `${b.size * 0.5}px serif`;
+          ctx.restore();
+        });
+
+        // Name reveals
+        const reveals = nameRevealsRef.current;
+        for (let i = reveals.length - 1; i >= 0; i--) {
+          const nr = reveals[i];
+          if (nr.opacity < 1 && nr.life > 0.5) {
+            nr.opacity = Math.min(1, nr.opacity + 0.03);
+            nr.scale = Math.min(1, nr.scale + 0.02);
+          }
+          nr.life -= 0.004;
+          if (nr.life < 0.3) {
+            nr.opacity = Math.max(0, nr.opacity - 0.015);
+            nr.y -= 0.3;
+          }
+          if (nr.life <= 0 || nr.opacity <= 0) {
+            reveals.splice(i, 1);
+            continue;
+          }
+          ctx.save();
+          ctx.globalAlpha = nr.opacity;
+          ctx.font = `600 ${48 * nr.scale}px Fredoka, sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText('😊', b.x, b.y);
-        } else {
-          // Normal bubble
-          const colorIdx = COLORS.indexOf(b.color);
-          const radGrad = ctx.createRadialGradient(
-            b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05,
-            b.x, b.y, b.size / 2
-          );
-          radGrad.addColorStop(0, HIGHLIGHT_COLORS[colorIdx >= 0 ? colorIdx : 0]);
-          radGrad.addColorStop(1, b.color);
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
-          ctx.fillStyle = radGrad;
-          ctx.fill();
-          // Subtle border
-          ctx.strokeStyle = b.color.replace('0.45', '0.2');
-          ctx.lineWidth = 1;
-          ctx.stroke();
+          ctx.shadowColor = 'rgba(255, 215, 0, 0.8)';
+          ctx.shadowBlur = 20;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+          ctx.fillText(nr.name, nr.x, nr.y);
+          ctx.shadowBlur = 40;
+          ctx.fillText(nr.name, nr.x, nr.y);
+          ctx.restore();
         }
-        ctx.restore();
-      }
 
-      // Update and draw sparkles
-      const sparkles = sparklesRef.current;
-      for (let i = sparkles.length - 1; i >= 0; i--) {
-        const s = sparkles[i];
-        s.x += s.vx;
-        s.y += s.vy;
-        s.vy += 0.05; // gravity
-        s.life -= 0.025;
-        if (s.life <= 0) {
-          sparkles.splice(i, 1);
-          continue;
+        // Star counter badge
+        const starCount = userStarsRef.current.length;
+        const clickCount = starClickCountRef.current;
+        const nextIdx = NAME_THRESHOLDS.findIndex((t, i) => !revealedNamesRef.current.has(i));
+        const nextThreshold = nextIdx >= 0 ? NAME_THRESHOLDS[nextIdx] : null;
+        let badgeText = `⭐ ${starCount} estrellas`;
+        if (nextThreshold) {
+          badgeText += `  ·  ${clickCount}/${nextThreshold} ✨`;
+        } else if (revealedNamesRef.current.size === FAMILY_NAMES.length) {
+          badgeText += `  ·  ¡Familia completa! 💫`;
         }
         ctx.save();
-        ctx.globalAlpha = s.life;
-        ctx.beginPath();
-        // Star shape
-        const spikes = 4;
-        const outerR = s.size;
-        const innerR = s.size * 0.4;
-        for (let j = 0; j < spikes * 2; j++) {
-          const r = j % 2 === 0 ? outerR : innerR;
-          const angle = (j * Math.PI) / spikes - Math.PI / 2;
-          const sx = s.x + Math.cos(angle) * r;
-          const sy = s.y + Math.sin(angle) * r;
-          if (j === 0) ctx.moveTo(sx, sy);
-          else ctx.lineTo(sx, sy);
-        }
-        ctx.closePath();
-        ctx.fillStyle = s.color;
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // Score badge (only if not calm mode)
-      if (!calm) {
-        const scoreText = `⭐ ${scoreRef.current}`;
-        ctx.save();
-        ctx.font = '600 24px Fredoka, sans-serif';
-        const metrics = ctx.measureText(scoreText);
+        ctx.font = '600 20px Fredoka, sans-serif';
+        const metrics = ctx.measureText(badgeText);
         const pw = 16;
         const bw = metrics.width + pw * 2;
-        const bh = 44;
+        const bh = 40;
         const bx = w / 2 - bw / 2;
         const by = 16;
-        // Backdrop
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.beginPath();
-        ctx.roundRect(bx, by, bw, bh, 22);
+        ctx.roundRect(bx, by, bw, bh, 20);
         ctx.fill();
-        // Outline
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
         ctx.lineWidth = 1;
         ctx.stroke();
-        // Text
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(scoreText, w / 2, by + bh / 2);
+        ctx.fillText(badgeText, w / 2, by + bh / 2);
         ctx.restore();
+
+      } else {
+        // BUBBLE MODE
+        const spawnInterval = calm ? 1200 : 600;
+        if (time - lastSpawnRef.current > spawnInterval / 16.67 && bubblesRef.current.filter(b => !b.popping).length < 35) {
+          spawnBubble();
+          lastSpawnRef.current = time;
+        }
+
+        const bubbles = bubblesRef.current;
+        for (let i = bubbles.length - 1; i >= 0; i--) {
+          const b = bubbles[i];
+          if (b.popping) {
+            b.opacity -= 0.08;
+            b.size += 3;
+            if (b.opacity <= 0) { bubbles.splice(i, 1); continue; }
+          } else {
+            b.y -= b.speedY;
+            b.x += Math.sin(time * b.wobbleSpeed + b.wobbleOffset) * 0.5;
+            if (b.y < -b.size) { bubbles.splice(i, 1); continue; }
+          }
+
+          ctx.save();
+          ctx.globalAlpha = b.opacity;
+
+          if (b.isSpecial && photoRef.current) {
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(photoRef.current, b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
+            ctx.restore();
+            ctx.save();
+            ctx.globalAlpha = b.opacity;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.size / 2 + 3, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + 0.3 * Math.sin(time * 0.05)})`;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.shadowColor = 'rgba(255, 215, 0, 0.4)';
+            ctx.shadowBlur = 15;
+            ctx.stroke();
+          } else if (b.isSpecial) {
+            const radGrad = ctx.createRadialGradient(b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05, b.x, b.y, b.size / 2);
+            radGrad.addColorStop(0, 'rgba(255, 240, 200, 0.6)');
+            radGrad.addColorStop(1, 'rgba(255, 215, 0, 0.3)');
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
+            ctx.fillStyle = radGrad;
+            ctx.fill();
+            ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + 0.3 * Math.sin(time * 0.05)})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.font = `${b.size * 0.5}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('😊', b.x, b.y);
+          } else {
+            const colorIdx = COLORS.indexOf(b.color);
+            const radGrad = ctx.createRadialGradient(b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05, b.x, b.y, b.size / 2);
+            radGrad.addColorStop(0, HIGHLIGHT_COLORS[colorIdx >= 0 ? colorIdx : 0]);
+            radGrad.addColorStop(1, b.color);
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
+            ctx.fillStyle = radGrad;
+            ctx.fill();
+            ctx.strokeStyle = b.color.replace('0.45', '0.2');
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
+        // Sparkles
+        const sparkles = sparklesRef.current;
+        for (let i = sparkles.length - 1; i >= 0; i--) {
+          const s = sparkles[i];
+          s.x += s.vx; s.y += s.vy; s.vy += 0.05; s.life -= 0.025;
+          if (s.life <= 0) { sparkles.splice(i, 1); continue; }
+          ctx.save();
+          ctx.globalAlpha = s.life;
+          const spikes = 4;
+          const outerR = s.size;
+          const innerR = s.size * 0.4;
+          ctx.beginPath();
+          for (let j = 0; j < spikes * 2; j++) {
+            const r = j % 2 === 0 ? outerR : innerR;
+            const angle = (j * Math.PI) / spikes - Math.PI / 2;
+            const sx = s.x + Math.cos(angle) * r;
+            const sy = s.y + Math.sin(angle) * r;
+            if (j === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+          }
+          ctx.closePath();
+          ctx.fillStyle = s.color;
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Score badge
+        if (!calm) {
+          const scoreText = `⭐ ${scoreRef.current}`;
+          ctx.save();
+          ctx.font = '600 24px Fredoka, sans-serif';
+          const metrics = ctx.measureText(scoreText);
+          const pw = 16;
+          const bw = metrics.width + pw * 2;
+          const bh = 44;
+          const bx = w / 2 - bw / 2;
+          const by = 16;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+          ctx.beginPath();
+          ctx.roundRect(bx, by, bw, bh, 22);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(scoreText, w / 2, by + bh / 2);
+          ctx.restore();
+        }
       }
 
       animFrameRef.current = requestAnimationFrame(loop);
@@ -385,7 +561,6 @@ export default function BubblePage() {
 
     animFrameRef.current = requestAnimationFrame(loop);
 
-    // PWA install prompt
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
       deferredPromptRef.current = e;
@@ -402,10 +577,9 @@ export default function BubblePage() {
     };
   }, [handleInteraction, spawnBubble]);
 
-  // Sync calm mode ref
   useEffect(() => { calmModeRef.current = calmMode; }, [calmMode]);
+  useEffect(() => { starModeRef.current = starMode; }, [starMode]);
 
-  // Load default Angel photo
   useEffect(() => {
     if (!defaultPhotoLoaded.current) {
       defaultPhotoLoaded.current = true;
@@ -438,103 +612,57 @@ export default function BubblePage() {
     }
   };
 
+  const btnStyle = (active?: boolean): React.CSSProperties => ({
+    pointerEvents: 'auto',
+    background: active ? 'rgba(100, 200, 255, 0.25)' : 'rgba(255, 255, 255, 0.12)',
+    border: `1px solid ${active ? 'rgba(100, 200, 255, 0.5)' : 'rgba(255, 255, 255, 0.2)'}`,
+    borderRadius: 22,
+    padding: '10px 18px',
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 14,
+    fontFamily: 'Fredoka, sans-serif',
+    cursor: 'pointer',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+  });
+
   return (
     <div style={{ position: 'fixed', inset: 0, touchAction: 'none', overflow: 'hidden' }}>
-      <canvas
-        ref={canvasRef}
-        style={{ display: 'block', width: '100%', height: '100%' }}
-      />
+      <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
 
-      {/* Bottom controls */}
       <div style={{
-        position: 'fixed',
-        bottom: 16,
-        left: 0,
-        right: 0,
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 10,
-        zIndex: 10,
-        pointerEvents: 'none',
+        position: 'fixed', bottom: 16, left: 0, right: 0,
+        display: 'flex', justifyContent: 'center', alignItems: 'center',
+        gap: 10, zIndex: 10, pointerEvents: 'none', flexWrap: 'wrap', padding: '0 10px',
       }}>
-        {/* Calm mode toggle */}
-        <button
-          onClick={() => setCalmMode(!calmMode)}
-          style={{
-            pointerEvents: 'auto',
-            background: calmMode ? 'rgba(100, 200, 255, 0.25)' : 'rgba(255, 255, 255, 0.12)',
-            border: `1px solid ${calmMode ? 'rgba(100, 200, 255, 0.5)' : 'rgba(255, 255, 255, 0.2)'}`,
-            borderRadius: 22,
-            padding: '10px 18px',
-            color: 'rgba(255, 255, 255, 0.85)',
-            fontSize: 14,
-            fontFamily: 'Fredoka, sans-serif',
-            cursor: 'pointer',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-          }}
-        >
-          {calmMode ? '🌙 Calma' : '✨ Normal'}
+        {!starMode && (
+          <button onClick={() => setCalmMode(!calmMode)} style={btnStyle(calmMode)}>
+            {calmMode ? '🌙 Calma' : '✨ Normal'}
+          </button>
+        )}
+
+        <button onClick={() => setStarMode(!starMode)} style={btnStyle(starMode)}>
+          {starMode ? '🫧 Burbujas' : '🌟 Estrellas'}
         </button>
 
-        {/* Photo upload */}
-        <label style={{
-          pointerEvents: 'auto',
-          background: 'rgba(255, 255, 255, 0.12)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          borderRadius: 22,
-          padding: '10px 18px',
-          color: 'rgba(255, 255, 255, 0.85)',
-          fontSize: 14,
-          fontFamily: 'Fredoka, sans-serif',
-          cursor: 'pointer',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-        }}>
-          {photo ? '📷 Cambiar foto' : '📷 Subir foto para burbujas'}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handlePhoto}
-            style={{ display: 'none' }}
-          />
-        </label>
+        {!starMode && (
+          <label style={btnStyle()}>
+            {photo ? '📷 Cambiar foto' : '📷 Subir foto'}
+            <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display: 'none' }} />
+          </label>
+        )}
 
-        {/* Install button */}
         {showInstall && (
-          <button
-            onClick={handleInstall}
-            style={{
-              pointerEvents: 'auto',
-              background: 'rgba(100, 255, 150, 0.2)',
-              border: '1px solid rgba(100, 255, 150, 0.4)',
-              borderRadius: 22,
-              padding: '10px 18px',
-              color: 'rgba(255, 255, 255, 0.85)',
-              fontSize: 14,
-              fontFamily: 'Fredoka, sans-serif',
-              cursor: 'pointer',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-            }}
-          >
+          <button onClick={handleInstall} style={{ ...btnStyle(), background: 'rgba(100, 255, 150, 0.2)', border: '1px solid rgba(100, 255, 150, 0.4)' }}>
             📲 Instalar App
           </button>
         )}
       </div>
 
-      {/* Footer */}
       <div style={{
-        position: 'fixed',
-        bottom: 2,
-        right: 8,
-        color: 'rgba(255,255,255,0.2)',
-        fontSize: 10,
-        fontFamily: 'Fredoka, sans-serif',
-        zIndex: 10,
-        pointerEvents: 'none',
+        position: 'fixed', bottom: 2, right: 8,
+        color: 'rgba(255,255,255,0.2)', fontSize: 10,
+        fontFamily: 'Fredoka, sans-serif', zIndex: 10, pointerEvents: 'none',
       }}>
         Hecho por duendes.app 2026
       </div>
