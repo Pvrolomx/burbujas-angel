@@ -11,10 +11,9 @@ interface Bubble {
   speedY: number;
   wobbleOffset: number;
   wobbleSpeed: number;
-  isSpecial: boolean;
+  familyIdx: number; // -1 = normal, 0+ = family member index
   opacity: number;
   popping: boolean;
-  createdAt: number;
 }
 
 interface Sparkle {
@@ -28,16 +27,6 @@ interface Sparkle {
   size: number;
 }
 
-interface Star {
-  id: number;
-  x: number;
-  y: number;
-  size: number;
-  twinkleSpeed: number;
-  phase: number;
-  color: string;
-}
-
 interface NameReveal {
   name: string;
   x: number;
@@ -46,6 +35,19 @@ interface NameReveal {
   scale: number;
   life: number;
 }
+
+const FAMILY = [
+  { name: 'Angel', file: 'Angel.jpg' },
+  { name: 'Diana', file: 'Diana.jpg' },
+  { name: 'Hector', file: 'Hector.jpg' },
+  { name: 'Irma', file: 'Irma.jpg' },
+  { name: 'Israel', file: 'Israel.jpg' },
+  { name: 'Santiago', file: 'Santiago.jpg' },
+  { name: 'Tía Alba', file: 'Tia_Alba.jpg' },
+  { name: 'Tía Chely', file: 'Tia_Chely.jpg' },
+  { name: 'Tía Jessy', file: 'Tia_Jessy.jpg' },
+  { name: 'Ada', file: 'Ada.jpg' },
+];
 
 const COLORS = [
   'rgba(255, 182, 193, 0.45)',
@@ -65,37 +67,28 @@ const HIGHLIGHT_COLORS = [
   'rgba(255, 230, 210, 0.7)',
 ];
 
-const STAR_COLORS = [
-  'rgba(255, 255, 255, 1)',
-  'rgba(200, 220, 255, 1)',
-  'rgba(255, 240, 200, 1)',
-  'rgba(200, 255, 255, 1)',
-  'rgba(255, 200, 255, 1)',
+const BORDER_COLORS = [
+  'rgba(255, 100, 150, 0.7)',
+  'rgba(100, 180, 255, 0.7)',
+  'rgba(100, 220, 100, 0.7)',
+  'rgba(255, 215, 0, 0.7)',
+  'rgba(180, 130, 255, 0.7)',
+  'rgba(255, 160, 100, 0.7)',
+  'rgba(255, 130, 200, 0.7)',
+  'rgba(130, 255, 200, 0.7)',
+  'rgba(200, 200, 255, 0.7)',
+  'rgba(255, 200, 200, 0.7)',
 ];
-
-const ALL_FAMILY_NAMES = ['Angel', 'Tia Chely', 'Tia Jessy', 'Diana', 'Hector', 'Israel', 'Santiago'];
-const BASE_THRESHOLDS = [10, 20, 35, 50, 70, 90, 110];
-
-function shuffleArray<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 
 export default function BubblePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bubblesRef = useRef<Bubble[]>([]);
   const sparklesRef = useRef<Sparkle[]>([]);
+  const nameRevealsRef = useRef<NameReveal[]>([]);
   const scoreRef = useRef(0);
   const [score, setScore] = useState(0);
   const [calmMode, setCalmMode] = useState(false);
   const calmModeRef = useRef(false);
-  const [photo, setPhoto] = useState<string | null>('/angel.jpg');
-  const photoRef = useRef<HTMLImageElement | null>(null);
-  const defaultPhotoLoaded = useRef(false);
   const nextIdRef = useRef(0);
   const animFrameRef = useRef<number>(0);
   const lastSpawnRef = useRef(0);
@@ -103,16 +96,19 @@ export default function BubblePage() {
   const [showInstall, setShowInstall] = useState(false);
   const deferredPromptRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const familyImagesRef = useRef<(HTMLImageElement | null)[]>(FAMILY.map(() => null));
+  const imagesLoadedRef = useRef(false);
 
-  // Star mode
-  const [starMode, setStarMode] = useState(false);
-  const starModeRef = useRef(false);
-  const userStarsRef = useRef<Star[]>([]);
-  const starClickCountRef = useRef(0);
-  const nameRevealsRef = useRef<NameReveal[]>([]);
-  const revealedNamesRef = useRef<Set<number>>(new Set());
-  const shuffledNamesRef = useRef<string[]>(shuffleArray(ALL_FAMILY_NAMES));
-  const familyCompleteRef = useRef(false);
+  // Load all family images
+  useEffect(() => {
+    if (imagesLoadedRef.current) return;
+    imagesLoadedRef.current = true;
+    FAMILY.forEach((member, idx) => {
+      const img = new Image();
+      img.onload = () => { familyImagesRef.current[idx] = img; };
+      img.src = `/family/${member.file}`;
+    });
+  }, []);
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -121,14 +117,14 @@ export default function BubblePage() {
     return audioCtxRef.current;
   }, []);
 
-  const playPop = useCallback((isSpecial: boolean) => {
+  const playPop = useCallback((isFamily: boolean) => {
     try {
       const ctx = getAudioCtx();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
-      const freq = isSpecial ? 600 + Math.random() * 200 : 320 + Math.random() * 480;
+      const freq = isFamily ? 600 + Math.random() * 200 : 320 + Math.random() * 480;
       osc.frequency.setValueAtTime(freq, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(freq * 0.5, ctx.currentTime + 0.15);
       gain.gain.setValueAtTime(calmModeRef.current ? 0.08 : 0.15, ctx.currentTime);
@@ -138,25 +134,7 @@ export default function BubblePage() {
     } catch (e) {}
   }, [getAudioCtx]);
 
-  const playStarSound = useCallback(() => {
-    try {
-      const ctx = getAudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      const freq = 800 + Math.random() * 600;
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(freq * 1.5, ctx.currentTime + 0.2);
-      gain.gain.setValueAtTime(0.08, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.3);
-    } catch (e) {}
-  }, [getAudioCtx]);
-
-  const playNameRevealSound = useCallback(() => {
+  const playNameSound = useCallback(() => {
     try {
       const ctx = getAudioCtx();
       [523, 659, 784].forEach((freq, i) => {
@@ -165,11 +143,11 @@ export default function BubblePage() {
         osc.type = 'sine';
         osc.connect(gain);
         gain.connect(ctx.destination);
-        osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.08);
-        gain.gain.setValueAtTime(0.1, ctx.currentTime + i * 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
-        osc.start(ctx.currentTime + i * 0.08);
-        osc.stop(ctx.currentTime + 0.8);
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.06);
+        gain.gain.setValueAtTime(0.08, ctx.currentTime + i * 0.06);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+        osc.start(ctx.currentTime + i * 0.06);
+        osc.stop(ctx.currentTime + 0.6);
       });
     } catch (e) {}
   }, [getAudioCtx]);
@@ -178,59 +156,42 @@ export default function BubblePage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const calm = calmModeRef.current;
-    const size = 40 + Math.random() * 70;
+    const isFamily = Math.random() < 0.18; // ~18% chance for family bubble
+    const familyIdx = isFamily ? Math.floor(Math.random() * FAMILY.length) : -1;
+    const size = isFamily ? 70 + Math.random() * 50 : 40 + Math.random() * 70;
     const colorIdx = Math.floor(Math.random() * COLORS.length);
-    const isSpecial = Math.random() < 0.12;
     const bubble: Bubble = {
       id: nextIdRef.current++,
       x: x ?? Math.random() * (canvas.width - size) + size / 2,
       y: y ?? canvas.height + size,
       size,
       color: COLORS[colorIdx],
-      speedY: calm ? 0.3 + Math.random() * 0.4 : 0.6 + Math.random() * 0.8,
+      speedY: calm ? 0.3 + Math.random() * 0.4 : 0.5 + Math.random() * 0.7,
       wobbleOffset: Math.random() * Math.PI * 2,
       wobbleSpeed: 0.01 + Math.random() * 0.02,
-      isSpecial,
+      familyIdx,
       opacity: 1,
       popping: false,
-      createdAt: Date.now(),
     };
     bubblesRef.current.push(bubble);
   }, []);
 
-  const spawnUserStars = useCallback((x: number, y: number) => {
-    const count = 3 + Math.floor(Math.random() * 5);
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 20 + Math.random() * 60;
-      userStarsRef.current.push({
-        id: nextIdRef.current++,
-        x: x + Math.cos(angle) * dist,
-        y: y + Math.sin(angle) * dist,
-        size: 1.5 + Math.random() * 3,
-        twinkleSpeed: 0.01 + Math.random() * 0.02,
-        phase: Math.random() * Math.PI * 2,
-        color: STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)],
-      });
-    }
-    if (userStarsRef.current.length > 500) {
-      userStarsRef.current = userStarsRef.current.slice(-500);
-    }
-  }, []);
-
-  const spawnSparkles = useCallback((x: number, y: number, isSpecial: boolean) => {
-    const count = isSpecial ? 12 : 8;
+  const spawnSparkles = useCallback((x: number, y: number, isFamily: boolean, familyIdx: number) => {
+    const count = isFamily ? 14 : 8;
+    const sparkleColor = isFamily
+      ? BORDER_COLORS[familyIdx % BORDER_COLORS.length]
+      : COLORS[Math.floor(Math.random() * COLORS.length)].replace('0.45', '0.9');
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
-      const speed = 2 + Math.random() * 3;
+      const speed = 2 + Math.random() * (isFamily ? 4 : 3);
       sparklesRef.current.push({
         id: nextIdRef.current++,
         x, y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         life: 1,
-        color: isSpecial ? 'rgba(255, 215, 0, 0.9)' : COLORS[Math.floor(Math.random() * COLORS.length)].replace('0.45', '0.9'),
-        size: isSpecial ? 4 : 3,
+        color: isFamily ? sparkleColor : COLORS[Math.floor(Math.random() * COLORS.length)].replace('0.45', '0.9'),
+        size: isFamily ? 5 : 3,
       });
     }
   }, []);
@@ -238,14 +199,29 @@ export default function BubblePage() {
   const popBubble = useCallback((bubble: Bubble) => {
     if (bubble.popping) return;
     bubble.popping = true;
-    playPop(bubble.isSpecial);
-    spawnSparkles(bubble.x, bubble.y, bubble.isSpecial);
-    const pts = bubble.isSpecial ? 5 : 1;
+    const isFamily = bubble.familyIdx >= 0;
+    playPop(isFamily);
+    spawnSparkles(bubble.x, bubble.y, isFamily, bubble.familyIdx);
+
+    if (isFamily) {
+      // Show family member name
+      playNameSound();
+      nameRevealsRef.current.push({
+        name: FAMILY[bubble.familyIdx].name,
+        x: bubble.x,
+        y: bubble.y,
+        opacity: 0,
+        scale: 0.3,
+        life: 1,
+      });
+    }
+
+    const pts = isFamily ? 5 : 1;
     if (!calmModeRef.current) {
       scoreRef.current += pts;
       setScore(scoreRef.current);
     }
-  }, [playPop, spawnSparkles]);
+  }, [playPop, playNameSound, spawnSparkles]);
 
   const handleInteraction = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -253,38 +229,6 @@ export default function BubblePage() {
     const rect = canvas.getBoundingClientRect();
     const x = (clientX - rect.left) * (canvas.width / rect.width);
     const y = (clientY - rect.top) * (canvas.height / rect.height);
-
-    if (starModeRef.current) {
-      // If family was complete, reset on next click
-      if (familyCompleteRef.current) {
-        familyCompleteRef.current = false;
-        starClickCountRef.current = 0;
-        revealedNamesRef.current = new Set();
-        shuffledNamesRef.current = shuffleArray(ALL_FAMILY_NAMES);
-      }
-      spawnUserStars(x, y);
-      playStarSound();
-      starClickCountRef.current++;
-      const clickCount = starClickCountRef.current;
-      for (let i = 0; i < BASE_THRESHOLDS.length; i++) {
-        if (clickCount === BASE_THRESHOLDS[i] && !revealedNamesRef.current.has(i)) {
-          revealedNamesRef.current.add(i);
-          nameRevealsRef.current.push({
-            name: shuffledNamesRef.current[i],
-            x: canvas.width / 2,
-            y: canvas.height / 2,
-            opacity: 0,
-            scale: 0.5,
-            life: 1,
-          });
-          playNameRevealSound();
-          if (revealedNamesRef.current.size === ALL_FAMILY_NAMES.length) {
-            familyCompleteRef.current = true;
-          }
-        }
-      }
-      return;
-    }
 
     const bubbles = bubblesRef.current;
     for (let i = bubbles.length - 1; i >= 0; i--) {
@@ -299,7 +243,7 @@ export default function BubblePage() {
       }
     }
     spawnBubble(x, y);
-  }, [popBubble, spawnBubble, spawnUserStars, playStarSound, playNameRevealSound]);
+  }, [popBubble, spawnBubble]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -308,7 +252,7 @@ export default function BubblePage() {
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      bgStarsRef.current = Array.from({ length: 50 }, () => ({
+      bgStarsRef.current = Array.from({ length: 40 }, () => ({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
         size: 1 + Math.random() * 2,
@@ -340,19 +284,12 @@ export default function BubblePage() {
       const w = canvas.width;
       const h = canvas.height;
       const calm = calmModeRef.current;
-      const inStarMode = starModeRef.current;
 
       // Background
       const grad = ctx.createLinearGradient(0, 0, 0, h);
-      if (inStarMode) {
-        grad.addColorStop(0, '#050520');
-        grad.addColorStop(0.5, '#0a0a30');
-        grad.addColorStop(1, '#15103a');
-      } else {
-        grad.addColorStop(0, '#0a0a2e');
-        grad.addColorStop(0.5, '#1a1a4e');
-        grad.addColorStop(1, '#2d1b69');
-      }
+      grad.addColorStop(0, '#0a0a2e');
+      grad.addColorStop(0.5, '#1a1a4e');
+      grad.addColorStop(1, '#2d1b69');
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
 
@@ -365,216 +302,175 @@ export default function BubblePage() {
         ctx.fill();
       });
 
-      if (inStarMode) {
-        // User stars
-        userStarsRef.current.forEach(star => {
-          const alpha = 0.4 + 0.6 * Math.abs(Math.sin(time * star.twinkleSpeed + star.phase));
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          const spikes = 4;
-          const outerR = star.size;
-          const innerR = star.size * 0.4;
-          ctx.beginPath();
-          for (let j = 0; j < spikes * 2; j++) {
-            const r = j % 2 === 0 ? outerR : innerR;
-            const angle = (j * Math.PI) / spikes - Math.PI / 2 + time * 0.005;
-            const sx = star.x + Math.cos(angle) * r;
-            const sy = star.y + Math.sin(angle) * r;
-            if (j === 0) ctx.moveTo(sx, sy);
-            else ctx.lineTo(sx, sy);
-          }
-          ctx.closePath();
-          ctx.fillStyle = star.color;
-          ctx.shadowColor = star.color;
-          ctx.shadowBlur = 6;
-          ctx.fill();
-          ctx.restore();
-        });
+      // Spawn bubbles
+      const spawnInterval = calm ? 1200 : 600;
+      if (time - lastSpawnRef.current > spawnInterval / 16.67 && bubblesRef.current.filter(b => !b.popping).length < 35) {
+        spawnBubble();
+        lastSpawnRef.current = time;
+      }
 
-        // Name reveals
-        const reveals = nameRevealsRef.current;
-        for (let i = reveals.length - 1; i >= 0; i--) {
-          const nr = reveals[i];
-          if (nr.opacity < 1 && nr.life > 0.5) {
-            nr.opacity = Math.min(1, nr.opacity + 0.03);
-            nr.scale = Math.min(1, nr.scale + 0.02);
-          }
-          nr.life -= 0.004;
-          if (nr.life < 0.3) {
-            nr.opacity = Math.max(0, nr.opacity - 0.015);
-            nr.y -= 0.3;
-          }
-          if (nr.life <= 0 || nr.opacity <= 0) {
-            reveals.splice(i, 1);
-            continue;
-          }
-          ctx.save();
-          ctx.globalAlpha = nr.opacity;
-          ctx.font = `600 ${48 * nr.scale}px Fredoka, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.shadowColor = 'rgba(255, 215, 0, 0.8)';
-          ctx.shadowBlur = 20;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-          ctx.fillText(nr.name, nr.x, nr.y);
-          ctx.shadowBlur = 40;
-          ctx.fillText(nr.name, nr.x, nr.y);
-          ctx.restore();
+      // Update and draw bubbles
+      const bubbles = bubblesRef.current;
+      for (let i = bubbles.length - 1; i >= 0; i--) {
+        const b = bubbles[i];
+        if (b.popping) {
+          b.opacity -= 0.08;
+          b.size += 3;
+          if (b.opacity <= 0) { bubbles.splice(i, 1); continue; }
+        } else {
+          b.y -= b.speedY;
+          b.x += Math.sin(time * b.wobbleSpeed + b.wobbleOffset) * 0.5;
+          if (b.y < -b.size) { bubbles.splice(i, 1); continue; }
         }
 
-        // Star counter badge
-        const starCount = userStarsRef.current.length;
-        const clickCount = starClickCountRef.current;
-        const nextIdx = BASE_THRESHOLDS.findIndex((t, i) => !revealedNamesRef.current.has(i));
-        const nextThreshold = nextIdx >= 0 ? BASE_THRESHOLDS[nextIdx] : null;
-        let badgeText = `⭐ ${starCount} estrellas`;
-        if (familyCompleteRef.current) {
-          badgeText += `  ·  ¡Familia completa! 💫 Toca para reiniciar`;
-        } else if (nextThreshold) {
-          badgeText += `  ·  ${clickCount}/${nextThreshold} ✨`;
-        }
         ctx.save();
-        ctx.font = '600 20px Fredoka, sans-serif';
-        const metrics = ctx.measureText(badgeText);
-        const pw = 16;
-        const bw = metrics.width + pw * 2;
-        const bh = 40;
-        const bx = w / 2 - bw / 2;
-        const by = 16;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.beginPath();
-        ctx.roundRect(bx, by, bw, bh, 20);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(badgeText, w / 2, by + bh / 2);
-        ctx.restore();
+        ctx.globalAlpha = b.opacity;
 
-      } else {
-        // BUBBLE MODE
-        const spawnInterval = calm ? 1200 : 600;
-        if (time - lastSpawnRef.current > spawnInterval / 16.67 && bubblesRef.current.filter(b => !b.popping).length < 35) {
-          spawnBubble();
-          lastSpawnRef.current = time;
-        }
+        const isFamily = b.familyIdx >= 0;
+        const familyImg = isFamily ? familyImagesRef.current[b.familyIdx] : null;
 
-        const bubbles = bubblesRef.current;
-        for (let i = bubbles.length - 1; i >= 0; i--) {
-          const b = bubbles[i];
-          if (b.popping) {
-            b.opacity -= 0.08;
-            b.size += 3;
-            if (b.opacity <= 0) { bubbles.splice(i, 1); continue; }
-          } else {
-            b.y -= b.speedY;
-            b.x += Math.sin(time * b.wobbleSpeed + b.wobbleOffset) * 0.5;
-            if (b.y < -b.size) { bubbles.splice(i, 1); continue; }
-          }
+        if (isFamily && familyImg) {
+          // Family photo bubble
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(familyImg, b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
+          ctx.restore();
 
+          // Colored glow border
           ctx.save();
           ctx.globalAlpha = b.opacity;
-
-          if (b.isSpecial && photoRef.current) {
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
-            ctx.closePath();
-            ctx.clip();
-            ctx.drawImage(photoRef.current, b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
-            ctx.restore();
-            ctx.save();
-            ctx.globalAlpha = b.opacity;
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, b.size / 2 + 3, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + 0.3 * Math.sin(time * 0.05)})`;
-            ctx.lineWidth = 3;
-            ctx.stroke();
-            ctx.shadowColor = 'rgba(255, 215, 0, 0.4)';
-            ctx.shadowBlur = 15;
-            ctx.stroke();
-          } else if (b.isSpecial) {
-            const radGrad = ctx.createRadialGradient(b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05, b.x, b.y, b.size / 2);
-            radGrad.addColorStop(0, 'rgba(255, 240, 200, 0.6)');
-            radGrad.addColorStop(1, 'rgba(255, 215, 0, 0.3)');
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
-            ctx.fillStyle = radGrad;
-            ctx.fill();
-            ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + 0.3 * Math.sin(time * 0.05)})`;
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.font = `${b.size * 0.5}px serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('😊', b.x, b.y);
-          } else {
-            const colorIdx = COLORS.indexOf(b.color);
-            const radGrad = ctx.createRadialGradient(b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05, b.x, b.y, b.size / 2);
-            radGrad.addColorStop(0, HIGHLIGHT_COLORS[colorIdx >= 0 ? colorIdx : 0]);
-            radGrad.addColorStop(1, b.color);
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
-            ctx.fillStyle = radGrad;
-            ctx.fill();
-            ctx.strokeStyle = b.color.replace('0.45', '0.2');
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-
-        // Sparkles
-        const sparkles = sparklesRef.current;
-        for (let i = sparkles.length - 1; i >= 0; i--) {
-          const s = sparkles[i];
-          s.x += s.vx; s.y += s.vy; s.vy += 0.05; s.life -= 0.025;
-          if (s.life <= 0) { sparkles.splice(i, 1); continue; }
-          ctx.save();
-          ctx.globalAlpha = s.life;
-          const spikes = 4;
-          const outerR = s.size;
-          const innerR = s.size * 0.4;
+          const borderColor = BORDER_COLORS[b.familyIdx % BORDER_COLORS.length];
+          const glowAlpha = 0.5 + 0.3 * Math.sin(time * 0.05 + b.familyIdx);
           ctx.beginPath();
-          for (let j = 0; j < spikes * 2; j++) {
-            const r = j % 2 === 0 ? outerR : innerR;
-            const angle = (j * Math.PI) / spikes - Math.PI / 2;
-            const sx = s.x + Math.cos(angle) * r;
-            const sy = s.y + Math.sin(angle) * r;
-            if (j === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-          }
-          ctx.closePath();
-          ctx.fillStyle = s.color;
-          ctx.fill();
-          ctx.restore();
-        }
-
-        // Score badge
-        if (!calm) {
-          const scoreText = `⭐ ${scoreRef.current}`;
-          ctx.save();
-          ctx.font = '600 24px Fredoka, sans-serif';
-          const metrics = ctx.measureText(scoreText);
-          const pw = 16;
-          const bw = metrics.width + pw * 2;
-          const bh = 44;
-          const bx = w / 2 - bw / 2;
-          const by = 16;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-          ctx.beginPath();
-          ctx.roundRect(bx, by, bw, bh, 22);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-          ctx.lineWidth = 1;
+          ctx.arc(b.x, b.y, b.size / 2 + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = borderColor.replace('0.7', String(glowAlpha));
+          ctx.lineWidth = 3;
+          ctx.shadowColor = borderColor;
+          ctx.shadowBlur = 12;
           ctx.stroke();
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.restore();
+        } else if (isFamily) {
+          // Family bubble without loaded image — show initial
+          const radGrad = ctx.createRadialGradient(
+            b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05,
+            b.x, b.y, b.size / 2
+          );
+          radGrad.addColorStop(0, 'rgba(255, 240, 200, 0.6)');
+          radGrad.addColorStop(1, 'rgba(255, 215, 0, 0.3)');
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
+          ctx.fillStyle = radGrad;
+          ctx.fill();
+          ctx.strokeStyle = BORDER_COLORS[b.familyIdx % BORDER_COLORS.length];
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          // Initial letter
+          ctx.font = `600 ${b.size * 0.4}px Fredoka, sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(scoreText, w / 2, by + bh / 2);
-          ctx.restore();
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.fillText(FAMILY[b.familyIdx].name[0], b.x, b.y);
+        } else {
+          // Normal bubble
+          const colorIdx = COLORS.indexOf(b.color);
+          const radGrad = ctx.createRadialGradient(
+            b.x - b.size * 0.2, b.y - b.size * 0.2, b.size * 0.05,
+            b.x, b.y, b.size / 2
+          );
+          radGrad.addColorStop(0, HIGHLIGHT_COLORS[colorIdx >= 0 ? colorIdx : 0]);
+          radGrad.addColorStop(1, b.color);
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
+          ctx.fillStyle = radGrad;
+          ctx.fill();
+          ctx.strokeStyle = b.color.replace('0.45', '0.2');
+          ctx.lineWidth = 1;
+          ctx.stroke();
         }
+        ctx.restore();
+      }
+
+      // Sparkles
+      const sparkles = sparklesRef.current;
+      for (let i = sparkles.length - 1; i >= 0; i--) {
+        const s = sparkles[i];
+        s.x += s.vx; s.y += s.vy; s.vy += 0.05; s.life -= 0.025;
+        if (s.life <= 0) { sparkles.splice(i, 1); continue; }
+        ctx.save();
+        ctx.globalAlpha = s.life;
+        const spikes = 4;
+        const outerR = s.size;
+        const innerR = s.size * 0.4;
+        ctx.beginPath();
+        for (let j = 0; j < spikes * 2; j++) {
+          const r = j % 2 === 0 ? outerR : innerR;
+          const angle = (j * Math.PI) / spikes - Math.PI / 2;
+          const sx = s.x + Math.cos(angle) * r;
+          const sy = s.y + Math.sin(angle) * r;
+          if (j === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+        }
+        ctx.closePath();
+        ctx.fillStyle = s.color;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Name reveals (floating up from popped family bubbles)
+      const reveals = nameRevealsRef.current;
+      for (let i = reveals.length - 1; i >= 0; i--) {
+        const nr = reveals[i];
+        if (nr.opacity < 1 && nr.life > 0.5) {
+          nr.opacity = Math.min(1, nr.opacity + 0.05);
+          nr.scale = Math.min(1, nr.scale + 0.04);
+        }
+        nr.y -= 0.8; // float up
+        nr.life -= 0.006;
+        if (nr.life < 0.3) {
+          nr.opacity = Math.max(0, nr.opacity - 0.02);
+        }
+        if (nr.life <= 0 || nr.opacity <= 0) {
+          reveals.splice(i, 1);
+          continue;
+        }
+        ctx.save();
+        ctx.globalAlpha = nr.opacity;
+        ctx.font = `600 ${36 * nr.scale}px Fredoka, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(255, 215, 0, 0.8)';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fillText(nr.name, nr.x, nr.y);
+        ctx.shadowBlur = 30;
+        ctx.fillText(nr.name, nr.x, nr.y);
+        ctx.restore();
+      }
+
+      // Score badge
+      if (!calm) {
+        const scoreText = `⭐ ${scoreRef.current}`;
+        ctx.save();
+        ctx.font = '600 24px Fredoka, sans-serif';
+        const metrics = ctx.measureText(scoreText);
+        const pw = 16;
+        const bw = metrics.width + pw * 2;
+        const bh = 44;
+        const bx = w / 2 - bw / 2;
+        const by = 16;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bw, bh, 22);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(scoreText, w / 2, by + bh / 2);
+        ctx.restore();
       }
 
       animFrameRef.current = requestAnimationFrame(loop);
@@ -599,30 +495,6 @@ export default function BubblePage() {
   }, [handleInteraction, spawnBubble]);
 
   useEffect(() => { calmModeRef.current = calmMode; }, [calmMode]);
-  useEffect(() => { starModeRef.current = starMode; }, [starMode]);
-
-  useEffect(() => {
-    if (!defaultPhotoLoaded.current) {
-      defaultPhotoLoaded.current = true;
-      const img = new Image();
-      img.onload = () => { photoRef.current = img; };
-      img.src = '/angel.jpg';
-    }
-  }, []);
-
-  const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      setPhoto(url);
-      const img = new Image();
-      img.onload = () => { photoRef.current = img; };
-      img.src = url;
-    };
-    reader.readAsDataURL(file);
-  };
 
   const handleInstall = async () => {
     if (deferredPromptRef.current) {
@@ -656,22 +528,9 @@ export default function BubblePage() {
         display: 'flex', justifyContent: 'center', alignItems: 'center',
         gap: 10, zIndex: 10, pointerEvents: 'none', flexWrap: 'wrap', padding: '0 10px',
       }}>
-        {!starMode && (
-          <button onClick={() => setCalmMode(!calmMode)} style={btnStyle(calmMode)}>
-            {calmMode ? '🌙 Calma' : '✨ Normal'}
-          </button>
-        )}
-
-        <button onClick={() => setStarMode(!starMode)} style={btnStyle(starMode)}>
-          {starMode ? '🫧 Burbujas' : '🌟 Estrellas'}
+        <button onClick={() => setCalmMode(!calmMode)} style={btnStyle(calmMode)}>
+          {calmMode ? '🌙 Calma' : '✨ Normal'}
         </button>
-
-        {!starMode && (
-          <label style={btnStyle()}>
-            {photo ? '📷 Cambiar foto' : '📷 Subir foto'}
-            <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display: 'none' }} />
-          </label>
-        )}
 
         {showInstall && (
           <button onClick={handleInstall} style={{ ...btnStyle(), background: 'rgba(100, 255, 150, 0.2)', border: '1px solid rgba(100, 255, 150, 0.4)' }}>
